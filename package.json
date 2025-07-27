@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "lucide-react": "^0.526.0",
+    "mammoth": "^1.9.1",
+    "pdfjs-dist": "^5.4.54",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
