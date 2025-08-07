@@ -1,10 +1,5 @@
-import React, { useState } from 'react';
-import { Sparkles, HelpCircle, AlertTriangle, Loader, CheckCircle, XCircle, FileText, Link, Type } from 'lucide-react';
-
-// NOTE: To parse files, you need to install helper libraries.
-// Run these commands in your terminal:
-// npm install mammoth
-// npm install pdfjs-dist
+import React, { useState, useEffect } from 'react';
+import { Sparkles, HelpCircle, AlertTriangle, Loader, CheckCircle, XCircle, FileText, Link, Type, Star } from 'lucide-react';
 
 // Main App Component
 export default function App() {
@@ -19,6 +14,32 @@ export default function App() {
   const [error, setError] = useState(null);
   const [isInitialState, setIsInitialState] = useState(true);
 
+  // --- NEW: State for Myth of the Week ---
+  const [mythOfTheWeek, setMythOfTheWeek] = useState('');
+
+  // --- NEW: Fetch Myth of the Week when the app loads ---
+  useEffect(() => {
+    const fetchMythOfTheWeek = async () => {
+      // Paste the webhook URL from your *second* Make.com scenario (the "getter")
+      const mythApiUrl = 'https://hook.eu2.make.com/3gdw7f6dh9uhhhgmiq0wga8cl8hxbja8';
+      
+      try {
+        const response = await fetch(mythApiUrl);
+        const mythText = await response.text(); // Make returns plain text
+        if (mythText) {
+          // The response might have quotes around it, so we remove them.
+          setMythOfTheWeek(mythText.replace(/"/g, ''));
+        }
+      } catch (err) {
+        console.error("Could not fetch Myth of the Week:", err);
+        // Don't show an error to the user, just log it.
+      }
+    };
+
+    fetchMythOfTheWeek();
+  }, []); // The empty array [] ensures this runs only once when the app loads.
+
+
   // --- File Handling ---
   const handleFileChange = async (e) => {
     const selectedFile = e.target.files[0];
@@ -26,10 +47,10 @@ export default function App() {
 
     setFile(selectedFile);
     setFileName(selectedFile.name);
-    setError(null); // Clear previous errors
+    setError(null);
   };
   
-  // Helper function to load a script dynamically from a CDN
+  // Helper function to load a script dynamically
   const loadScript = (src) => {
     return new Promise((resolve, reject) => {
       if (document.querySelector(`script[src="${src}"]`)) {
@@ -53,124 +74,105 @@ export default function App() {
     setIsInitialState(false);
 
     try {
-        // 1. Get content based on input type
-        if (inputType === 'text') {
-            if (!myth.trim()) throw new Error('Please enter a health myth to debunk.');
-            contentToAnalyze = myth;
-        } else if (inputType === 'file') {
-            if (!file) throw new Error('Please select a file to analyze.');
-            
-            if (file.type === "application/pdf") {
-                await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-                const pdfjsLib = window.pdfjsLib;
-                pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
-                
-                const reader = new FileReader();
-                const text = await new Promise((resolve, reject) => {
-                    reader.onload = async (event) => {
-                        try {
-                            const pdf = await pdfjsLib.getDocument(new Uint8Array(event.target.result)).promise;
-                            let fullText = '';
-                            for (let i = 1; i <= pdf.numPages; i++) {
-                                const page = await pdf.getPage(i);
-                                const textContent = await page.getTextContent();
-                                fullText += textContent.items.map(item => item.str).join(' ') + '\n';
-                            }
-                            resolve(fullText);
-                        } catch (e) {
-                            reject(e);
-                        }
-                    };
-                    reader.readAsArrayBuffer(file);
-                });
-                contentToAnalyze = text;
-
-            } else if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-                await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
-                const mammoth = window.mammoth;
-                const reader = new FileReader();
-                const { value } = await new Promise((resolve, reject) => {
-                     reader.onload = (event) => {
-                        mammoth.extractRawText({ arrayBuffer: event.target.result })
-                            .then(resolve)
-                            .catch(reject);
-                    };
-                    reader.readAsArrayBuffer(file);
-                });
-                contentToAnalyze = value;
-            } else {
-                throw new Error('Unsupported file type. Please use PDF or DOCX.');
-            }
-        } else if (inputType === 'url') {
-            if (!url.trim()) throw new Error('Please enter a URL to analyze.');
-            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-            const response = await fetch(proxyUrl);
-            if (!response.ok) {
-                throw new Error('Could not fetch the URL content. The site may be down or blocking requests.');
-            }
-            const htmlContent = await response.text();
-            contentToAnalyze = htmlContent;
-        }
-
-        if (!contentToAnalyze.trim()) {
-            throw new Error("Could not extract any text to analyze.");
-        }
-        
-        // 2. Call Gemini API with the extracted content
-        let prompt;
-        if (inputType === 'url') {
-            prompt = `You are an expert in medical science. Analyze the main textual content from the following HTML and respond ONLY with a valid JSON object. Ignore navigation, ads, and footers. Focus on the main article. The JSON object must have "verdict" ("Fact", "Myth", "Partially True") and "explanation" keys. HTML Content to Analyze: "${contentToAnalyze.substring(0, 8000)}"`;
-        } else {
-            prompt = `You are an expert in medical science. Analyze the following content and respond ONLY with a valid JSON object. The JSON object must have "verdict" ("Fact", "Myth", "Partially True") and "explanation" keys. Content to Analyze: "${contentToAnalyze.substring(0, 8000)}"`;
-        }
-        
-        const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-        const apiKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || "";
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-        const apiResponse = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!apiResponse.ok) throw new Error(`API error: ${apiResponse.status}`);
-
-        const result = await apiResponse.json();
-        const rawText = result.candidates[0].content.parts[0].text;
-        const cleanedText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-        const parsedAnalysis = JSON.parse(cleanedText);
-        setAnalysis(parsedAnalysis);
-
-        // ===================================================================
-        // ## START: LOG TO MAKE.COM (NOW WITH AI VERDICT!) ##
-        // ===================================================================
-        const makeWebhookUrl = 'https://hook.eu2.make.com/h8p3na13d1bx4bpkvrah642ypxeltciy';
-
-        try {
-          fetch(makeWebhookUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              myth: contentToAnalyze.substring(0, 1000), 
-              inputType: inputType,
-              verdict: parsedAnalysis.verdict, // <-- THE NEW DATA
-            }),
+      // (The logic for getting content from text, file, or URL is unchanged)
+      if (inputType === 'text') {
+        if (!myth.trim()) throw new Error('Please enter a health myth to debunk.');
+        contentToAnalyze = myth;
+      } else if (inputType === 'file') {
+        if (!file) throw new Error('Please select a file to analyze.');
+        if (file.type === "application/pdf") {
+          await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+          const pdfjsLib = window.pdfjsLib;
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+          const reader = new FileReader();
+          contentToAnalyze = await new Promise((resolve, reject) => {
+            reader.onload = async (event) => {
+              try {
+                const pdf = await pdfjsLib.getDocument(new Uint8Array(event.target.result)).promise;
+                let fullText = '';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                  const page = await pdf.getPage(i);
+                  const textContent = await page.getTextContent();
+                  fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+                }
+                resolve(fullText);
+              } catch (e) { reject(e); }
+            };
+            reader.readAsArrayBuffer(file);
           });
-        } catch (logError) {
-          console.error("Could not log myth to Make.com:", logError);
+        } else if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+          await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+          const mammoth = window.mammoth;
+          const reader = new FileReader();
+          const { value } = await new Promise((resolve, reject) => {
+            reader.onload = (event) => {
+              mammoth.extractRawText({ arrayBuffer: event.target.result }).then(resolve).catch(reject);
+            };
+            reader.readAsArrayBuffer(file);
+          });
+          contentToAnalyze = value;
+        } else {
+          throw new Error('Unsupported file type. Please use PDF or DOCX.');
         }
-        // ===================================================================
-        // ## END: LOG TO MAKE.COM ##
-        // ===================================================================
+      } else if (inputType === 'url') {
+        if (!url.trim()) throw new Error('Please enter a URL to analyze.');
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error('Could not fetch the URL content.');
+        contentToAnalyze = await response.text();
+      }
+
+      if (!contentToAnalyze.trim()) {
+        throw new Error("Could not extract any text to analyze.");
+      }
+
+      // Call Gemini API
+      let prompt;
+      if (inputType === 'url') {
+        prompt = `You are an expert in medical science. Analyze the main textual content from the following HTML and respond ONLY with a valid JSON object. Ignore navigation, ads, and footers. Focus on the main article. The JSON object must have "verdict" ("Fact", "Myth", "Partially True") and "explanation" keys. HTML Content to Analyze: "${contentToAnalyze.substring(0, 8000)}"`;
+      } else {
+        prompt = `You are an expert in medical science. Analyze the following content and respond ONLY with a valid JSON object. The JSON object must have "verdict" ("Fact", "Myth", "Partially True") and "explanation" keys. Content to Analyze: "${contentToAnalyze.substring(0, 8000)}"`;
+      }
+      
+      const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+      const apiKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || "";
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+      const apiResponse = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!apiResponse.ok) throw new Error(`API error: ${apiResponse.status}`);
+
+      const result = await apiResponse.json();
+      const rawText = result.candidates[0].content.parts[0].text;
+      const cleanedText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const parsedAnalysis = JSON.parse(cleanedText);
+      setAnalysis(parsedAnalysis);
+
+      // Log to your first Make.com Webhook (the logger)
+      const makeLoggerUrl = 'https://hook.eu2.make.com/h8p3na13d1bx4bpkvrah642ypxeltciy'; 
+      try {
+        fetch(makeLoggerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            myth: contentToAnalyze.substring(0, 1000), 
+            inputType: inputType,
+            verdict: parsedAnalysis.verdict,
+          }),
+        });
+      } catch (logError) {
+        console.error("Could not log myth to Make.com:", logError);
+      }
 
     } catch (err) {
-        console.error("Error debunking myth:", err);
-        setError(err.message);
+      console.error("Error debunking myth:", err);
+      setError(err.message);
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
     }
   };
 
@@ -191,6 +193,17 @@ export default function App() {
           <h1 className="text-4xl sm:text-5xl font-bold text-slate-900">Health Myth Debunker</h1>
           <p className="text-lg text-slate-600 mt-2">Verify health claims with science-backed facts.</p>
         </header>
+
+        {/* --- NEW: Myth of the Week Display --- */}
+        {mythOfTheWeek && (
+            <div className="mb-8 p-4 bg-purple-100 border-l-4 border-purple-500 rounded-lg shadow-sm animate-fade-in">
+                <div className="flex items-center">
+                    <Star className="w-6 h-6 text-purple-600 mr-3"/>
+                    <h3 className="font-bold text-lg text-purple-800">Trending Myth</h3>
+                </div>
+                <p className="mt-2 text-purple-700">{mythOfTheWeek}</p>
+            </div>
+        )}
 
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-200">
             {/* Input Type Tabs */}
