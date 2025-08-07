@@ -32,7 +32,6 @@ export default function App() {
   // Helper function to load a script dynamically from a CDN
   const loadScript = (src) => {
     return new Promise((resolve, reject) => {
-      // Check if script already exists
       if (document.querySelector(`script[src="${src}"]`)) {
         resolve();
         return;
@@ -62,11 +61,8 @@ export default function App() {
             if (!file) throw new Error('Please select a file to analyze.');
             
             if (file.type === "application/pdf") {
-                // Load pdf.js from CDN if not already present
                 await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-                
                 const pdfjsLib = window.pdfjsLib;
-                // Set worker source from CDN as well
                 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
                 
                 const reader = new FileReader();
@@ -90,9 +86,7 @@ export default function App() {
                 contentToAnalyze = text;
 
             } else if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-                // Load mammoth.js from CDN if not already present
                 await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
-
                 const mammoth = window.mammoth;
                 const reader = new FileReader();
                 const { value } = await new Promise((resolve, reject) => {
@@ -109,7 +103,6 @@ export default function App() {
             }
         } else if (inputType === 'url') {
             if (!url.trim()) throw new Error('Please enter a URL to analyze.');
-            // Use a CORS proxy to fetch URL content from the client-side
             const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
             const response = await fetch(proxyUrl);
             if (!response.ok) {
@@ -122,22 +115,13 @@ export default function App() {
         if (!contentToAnalyze.trim()) {
             throw new Error("Could not extract any text to analyze.");
         }
-
+        
         // 2. Call Gemini API with the extracted content
         let prompt;
         if (inputType === 'url') {
-            prompt = `
-                You are an expert in medical science. Analyze the main textual content from the following HTML and respond ONLY with a valid JSON object.
-                Ignore navigation, ads, and footers. Focus on the main article.
-                The JSON object must have "verdict" ("Fact", "Myth", "Partially True") and "explanation" keys.
-                HTML Content to Analyze: "${contentToAnalyze.substring(0, 8000)}"
-            `;
+            prompt = `You are an expert in medical science. Analyze the main textual content from the following HTML and respond ONLY with a valid JSON object. Ignore navigation, ads, and footers. Focus on the main article. The JSON object must have "verdict" ("Fact", "Myth", "Partially True") and "explanation" keys. HTML Content to Analyze: "${contentToAnalyze.substring(0, 8000)}"`;
         } else {
-            prompt = `
-                You are an expert in medical science. Analyze the following content and respond ONLY with a valid JSON object.
-                The JSON object must have "verdict" ("Fact", "Myth", "Partially True") and "explanation" keys.
-                Content to Analyze: "${contentToAnalyze.substring(0, 8000)}"
-            `;
+            prompt = `You are an expert in medical science. Analyze the following content and respond ONLY with a valid JSON object. The JSON object must have "verdict" ("Fact", "Myth", "Partially True") and "explanation" keys. Content to Analyze: "${contentToAnalyze.substring(0, 8000)}"`;
         }
         
         const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
@@ -157,6 +141,30 @@ export default function App() {
         const cleanedText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsedAnalysis = JSON.parse(cleanedText);
         setAnalysis(parsedAnalysis);
+
+        // ===================================================================
+        // ## START: LOG TO MAKE.COM (NOW WITH AI VERDICT!) ##
+        // ===================================================================
+        const makeWebhookUrl = 'https://hook.eu2.make.com/h8p3na13d1bx4bpkvrah642ypxeltciy';
+
+        try {
+          fetch(makeWebhookUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              myth: contentToAnalyze.substring(0, 1000), 
+              inputType: inputType,
+              verdict: parsedAnalysis.verdict, // <-- THE NEW DATA
+            }),
+          });
+        } catch (logError) {
+          console.error("Could not log myth to Make.com:", logError);
+        }
+        // ===================================================================
+        // ## END: LOG TO MAKE.COM ##
+        // ===================================================================
 
     } catch (err) {
         console.error("Error debunking myth:", err);
